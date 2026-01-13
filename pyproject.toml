@@ -45,13 +45,8 @@ build-backend = "hatchling.build"
 index-url = "https://download.pytorch.org/whl/cu130"
 
 [tool.uv.sources]
-# vLLM cu130 nightly for aarch64 (DGX Spark)
+# vLLM cu130 for aarch64 (DGX Spark) - pinned to specific nightly wheel
+# This is experimental - see README for build-from-source fallback
 vllm = [
-  { index = "vllm-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+  { url = "https://wheels.vllm.ai/a307ac073432d3f224c58a54d363fa93f6a659f4/vllm-0.14.0rc1.dev531%2Bga307ac073.cu130-cp38-abi3-manylinux_2_35_aarch64.whl", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
-
-# Custom indices
-[[tool.uv.index]]
-name = "vllm-cu130"
-url = "https://wheels.vllm.ai/nightly/cu130"
-explicit = true
