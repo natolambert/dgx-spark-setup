@@ -1,0 +1,57 @@
+# Minimal pyproject.toml for ML training on DGX Spark (GB10, CUDA 13, aarch64)
+# This configuration properly handles the CUDA 13 ecosystem challenges
+
+[project]
+name = "dgx-spark-ml"
+version = "0.1.0"
+description = "Minimal ML setup for DGX Spark"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # PyTorch - cu130 wheels available for aarch64
+    "torch>=2.9.0",
+    "torchvision",
+    "torchaudio",
+
+    # Core ML libraries
+    "transformers>=4.50.0",
+    "accelerate>=1.6.0",
+    "datasets>=3.1.0",
+    "peft>=0.15.1",
+
+    # Training utilities
+    "deepspeed>=0.16.7",
+    "wandb>=0.18.1",
+    "rich>=14.0.0",
+
+    # vLLM - different versions for x86_64 vs aarch64 (DGX Spark)
+    # x86_64: standard PyPI releases
+    # aarch64: need cu130 nightly wheels
+    "vllm>=0.12.0; platform_machine != 'aarch64'",
+    "vllm>=0.13.0; platform_machine == 'aarch64'",
+
+    # Flash attention - EXCLUDE on aarch64
+    # vLLM bundles FlashInfer and PyTorch SDPA is faster on Blackwell anyway
+    "flash-attn>=2.8.3; platform_machine != 'aarch64'",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# UV configuration for handling CUDA wheels
+[tool.uv]
+# PyTorch cu130 index (has aarch64 wheels)
+index-url = "https://download.pytorch.org/whl/cu130"
+
+[tool.uv.sources]
+# vLLM cu130 nightly for aarch64 (DGX Spark)
+vllm = [
+  { index = "vllm-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+]
+
+# Custom indices
+[[tool.uv.index]]
+name = "vllm-cu130"
+url = "https://wheels.vllm.ai/nightly/cu130"
+explicit = true
