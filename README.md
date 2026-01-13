@@ -26,6 +26,12 @@ This guide was created while getting [open-instruct](https://github.com/allenai/
 ImportError: libcudart.so.12: cannot open shared object file: No such file or directory
 ```
 
+## Important: Fragile Ecosystem
+
+**The DGX Spark ML ecosystem is fragile.** There are no stable cu130 aarch64 vLLM releases yet. We pin to a specific nightly wheel that may stop being hosted at any time.
+
+**Fallback**: If the pinned wheel stops working, see [Building vLLM from Source](#building-vllm-from-source-fallback) (~25-35 min build time).
+
 ## Quick Start
 
 ```bash
@@ -36,8 +42,8 @@ source .venv/bin/activate
 # 2. Install PyTorch cu130 (aarch64 wheels exist!)
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
 
-# 3. Install vLLM cu130 from nightly index
-uv pip install -U vllm --extra-index-url https://wheels.vllm.ai/nightly/cu130
+# 3. Install vLLM cu130 (pinned to v0.13.0 stable)
+uv pip install "vllm @ https://wheels.vllm.ai/72506c98349d6bcd32b4e33eec7b5513453c1502/vllm-0.13.0%2Bcu130-cp38-abi3-manylinux_2_35_aarch64.whl"
 
 # 4. DON'T install flash-attn (vLLM bundles FlashInfer, SDPA is faster on Blackwell anyway)
 ```
@@ -247,6 +253,50 @@ Try `--vllm_enforce_eager` to disable CUDA graphs.
 | Flash-Attention 4 | Unknown | Maintainers transitioning to CuTe DSL |
 | vLLM native pip | Available now | cu130 nightly wheels |
 | NVIDIA containers | Available now | NGC catalog |
+
+## Building vLLM from Source (Fallback)
+
+If the pinned wheel stops working, you can build vLLM from source. **Estimated time: 25-35 minutes.**
+
+### Automated Script
+
+```bash
+cd ~/dev/dgx-spark-setup
+./scripts/build_vllm_from_source.sh
+```
+
+This script:
+1. Creates a fresh virtualenv
+2. Installs PyTorch cu130
+3. Clones vLLM v0.13.0
+4. Builds with CUDA 13 / sm_121a support
+5. Reports timing for each step
+
+### Manual Build
+
+```bash
+# 1. Create environment
+uv venv vllm-build --python 3.12
+source vllm-build/bin/activate
+
+# 2. Install PyTorch cu130
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+
+# 3. Clone vLLM
+git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git
+cd vllm
+
+# 4. Set CUDA 13 environment
+export CUDA_HOME=/usr/local/cuda
+export TORCH_CUDA_ARCH_LIST="12.1a"
+export TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
+export MAX_JOBS=4  # Prevent OOM during compilation
+
+# 5. Build
+python use_existing_torch.py
+uv pip install -r requirements/build.txt
+uv pip install --no-build-isolation -e .
+```
 
 ## References
 
