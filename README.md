@@ -210,12 +210,14 @@ uv run python -m accelerate.commands.launch \
     --with_tracking \
     ...
 
-# GRPO
+# GRPO (single GPU)
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --attn_implementation sdpa \
     --vllm_enforce_eager \
+    --vllm_sync_backend gloo \
+    --vllm_gpu_memory_utilization 0.3 \
     --single_gpu_mode \
     --with_tracking \
     ...
