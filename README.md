@@ -152,6 +152,181 @@ export TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 export VLLM_USE_FLASHINFER_MXFP4_MOE=1
 ```
 
+## Memory Management & OOM Prevention
+
+### Why DGX Spark OOMs Are Different
+
+DGX Spark is **not a normal GPU workstation**. It's a Grace Blackwell system with **128GB of unified memory**—the GPU and CPU share the same DRAM pool (no dedicated VRAM).
+
+**Two critical consequences:**
+
+1. **"GPU OOM" = "System OOM"**: When training allocates "GPU memory," it's consuming system RAM that the OS, SSH, and your agents also need.
+
+2. **Memory telemetry is weird**: `nvidia-smi` shows "Memory-Usage: N/A" on unified systems, even though memory is being used.
+
+**The failure mode**: Instead of a clean `RuntimeError: CUDA out of memory`, the machine goes "zombie" (SSH hangs, job looks alive externally, hard reboot needed).
+
+### Why It Bricks Instead of Failing Cleanly
+
+From NVIDIA forum reports, the root cause is the **swap death spiral**:
+
+1. Training exceeds available memory
+2. System starts swapping aggressively
+3. Swap thrashing makes the system unresponsive
+4. SSH dies before any cleanup can happen
+5. Hard reboot required
+
+**The fix**: Disable swap. This converts "brick the box" into "job dies, OS lives."
+
+### Defense-in-Depth: 5 Layers of Protection
+
+#### Layer 1: Disable Swap (Most Important)
+
+```bash
+# Disable immediately (temporary)
+sudo swapoff -a
+swapon --show  # should print nothing
+
+# Make permanent: edit /etc/fstab and comment out swap entries
+sudoedit /etc/fstab
+```
+
+#### Layer 2: Run Experiments in Memory Jails (cgroups)
+
+Put every training run in a memory-capped scope:
+
+```bash
+sudo systemd-run --scope \
+  -p MemoryMax=100G \
+  -p MemorySwapMax=0 \
+  -p OOMScoreAdjust=500 \
+  bash -lc 'cd ~/open-instruct && uv run python ...'
+```
+
+- **MemoryMax=100G**: Hard cap (leaves ~19GB for OS)
+- **MemorySwapMax=0**: No swap for this job
+- **OOMScoreAdjust=500**: Kernel prefers killing this over other services
+
+#### Layer 3: Protect SSH and Agents
+
+Create SSH override to make it unkillable:
+
+```bash
+sudo mkdir -p /etc/systemd/system/ssh.service.d
+sudo tee /etc/systemd/system/ssh.service.d/oom.conf >/dev/null <<'EOF'
+[Service]
+OOMScoreAdjust=-1000
+MemoryMin=512M
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart ssh.service
+```
+
+#### Layer 4: Memory Watchdog
+
+Kill jobs before they hit the cliff:
+
+```bash
+# watchdog.sh - run in separate terminal
+WATCH_PID=$1
+THRESHOLD_KB=$((16 * 1024 * 1024))  # 16GB
+
+while true; do
+  avail_kb=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo)
+  if [ "$avail_kb" -lt "$THRESHOLD_KB" ]; then
+    echo "MemAvailable low (${avail_kb}kB). Killing $WATCH_PID"
+    kill -TERM "$WATCH_PID" 2>/dev/null || true
+    sleep 5
+    kill -KILL "$WATCH_PID" 2>/dev/null || true
+    break
+  fi
+  sleep 1
+done
+```
+
+#### Layer 5: Drop Caches Between Runs
+
+```bash
+# Reset memory state between experiments
+sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
+```
+
+### Recommended Default Posture
+
+For sweep-style work on DGX Spark:
+
+1. **Swap off** (until NVIDIA says otherwise)
+2. **Memory-capped scope** for every experiment (~100G max)
+3. **Protect SSH** with OOMScoreAdjust=-1000
+4. **Watchdog** to kill early
+5. **Hard sequence length cap** in data preprocessing
+6. **drop_caches** between runs
+
+### Memory Profiling Results (2026-01-14)
+
+#### Qwen3-0.6B SFT (seq_len=1024, gradient_checkpointing=true)
+
+| batch | grad_accum | total_batch | peak_mem | headroom | status |
+|-------|------------|-------------|----------|----------|--------|
+| 2 | 1 | 2 | 21GB | 98GB | ✅ safe |
+| 4 | 1 | 4 | 29GB | 90GB | ✅ safe |
+| 8 | 1 | 8 | 47GB | 72GB | ✅ recommended |
+| 16 | 1 | 16 | 81GB | 38GB | ⚠️ limit |
+
+**Key insight**: Memory scales **super-linearly** with batch size. Doubling batch from 8→16 adds 34GB, not 24GB.
+
+#### Qwen3-0.6B DPO (seq_len=1024, gradient_checkpointing=true)
+
+| batch | grad_accum | total_batch | peak_mem | headroom | status |
+|-------|------------|-------------|----------|----------|--------|
+| 2 | 1 | 2 | 24GB | 95GB | ✅ safe |
+| 4 | 1 | 4 | 27GB | 92GB | ✅ safe |
+| 8 | 1 | 8 | 62GB | 57GB | ✅ recommended |
+
+**DPO vs SFT**: DPO uses ~1.3x more memory at batch=8 (62GB vs 47GB).
+
+**Safe defaults for Qwen3-0.6B SFT:**
+```bash
+--per_device_train_batch_size 8 \
+--gradient_accumulation_steps 4 \  # total_batch=32
+--max_seq_length 1024 \
+--gradient_checkpointing
+```
+
+**Safe defaults for Qwen3-0.6B DPO:**
+```bash
+--per_device_train_batch_size 4 \
+--gradient_accumulation_steps 8 \  # total_batch=32
+--max_seq_length 1024 \
+--gradient_checkpointing
+```
+
+### Memory Estimation
+
+```
+SFT:  ~6 * model_params_B + activation_memory
+DPO:  ~1.3 * SFT (policy + frozen reference, less than expected!)
+GRPO: SFT + vllm_gpu_memory_utilization * 119GB
+```
+
+### Pre-flight Checks
+
+```bash
+# Check memory
+free -h
+
+# Kill leftover processes
+pkill -9 -f "ray::" 2>/dev/null || true
+pkill -9 -f "VLLM" 2>/dev/null || true
+sleep 10
+
+# Clear caches
+sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
+
+# Verify >80GB free before starting
+```
+
 ## Example: open-instruct on DGX Spark
 
 We successfully ran SFT and GRPO training on DGX Spark with these modifications:
@@ -309,6 +484,25 @@ uv pip install --no-build-isolation -e .
 - [vLLM Installation Docs](https://docs.vllm.ai/en/latest/getting_started/installation/gpu.html)
 - [vLLM Wheel Index](https://wheels.vllm.ai/nightly/cu130/)
 
+## Real-World Implementations
+
+### open-instruct (AI2)
+
+The [open-instruct](https://github.com/allenai/open-instruct) repo has DGX Spark support on the `dgx-spark-support` branch:
+
+- SFT, DPO, and GRPO training scripts for single-GPU Blackwell
+- Memory profiling scripts and documentation
+- pyproject.toml modifications for aarch64 + CUDA 13
+
+Key changes:
+```toml
+# vLLM: use cu130 nightly for aarch64
+"vllm>=0.13.0; platform_machine == 'aarch64'"
+
+# Exclude flash-attn on aarch64 (use SDPA instead)
+"flash-attn>=2.8.3; platform_machine != 'aarch64'"
+```
+
 ## Contributing
 
-Found something that works (or doesn't)? Open an issue or PR!
+Got a framework working on DGX Spark? Open a PR to add it here!
