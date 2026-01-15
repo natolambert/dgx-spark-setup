@@ -4,6 +4,32 @@ A comprehensive guide for setting up ML training on NVIDIA DGX Spark with GB10 (
 
 This guide was created while getting [open-instruct](https://github.com/allenai/open-instruct) running on DGX Spark for SFT and GRPO/RL training.
 
+## Contents
+
+| Section | Description |
+|---------|-------------|
+| [Hardware Overview](#hardware-overview) | GB10 specs and system info |
+| [Quick Start](#quick-start) | Get running in 4 commands |
+| [Package Compatibility](#package-compatibility-matrix) | What works, what doesn't |
+| [vLLM Setup](#vllm-setup) | cu130 wheels and containers |
+| [Flash Attention](#flash-attention-dont-install-it) | Why to skip it, use SDPA |
+| [Environment Variables](#environment-variables) | Required exports |
+| [Memory Management](#memory-management--oom-prevention) | OOM prevention, profiling results |
+| [open-instruct Example](#example-open-instruct-on-dgx-spark) | Real-world training setup |
+| [Troubleshooting](#troubleshooting) | Common errors and fixes |
+| [Building from Source](#building-vllm-from-source-fallback) | Fallback if wheels break |
+
+**Scripts:**
+| File | Description |
+|------|-------------|
+| [`scripts/build_vllm_from_source.sh`](scripts/build_vllm_from_source.sh) | Build vLLM with CUDA 13 support |
+| [`scripts/oom_protection.sh`](scripts/oom_protection.sh) | Memory checks and cleanup utilities |
+
+**Docs:**
+| File | Description |
+|------|-------------|
+| [`docs/memory_profiling_methodology.md`](docs/memory_profiling_methodology.md) | How to safely profile batch sizes |
+
 ## Hardware Overview
 
 | Component | Specification |
