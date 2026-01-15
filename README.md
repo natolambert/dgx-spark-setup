@@ -24,6 +24,9 @@ This guide was created while getting [open-instruct](https://github.com/allenai/
 |------|-------------|
 | [`scripts/build_vllm_from_source.sh`](scripts/build_vllm_from_source.sh) | Build vLLM with CUDA 13 support |
 | [`scripts/oom_protection.sh`](scripts/oom_protection.sh) | Memory checks and cleanup utilities |
+| [`scripts/memory_profile_sft.sh`](scripts/memory_profile_sft.sh) | Profile memory for SFT training |
+| [`scripts/memory_profile_dpo.sh`](scripts/memory_profile_dpo.sh) | Profile memory for DPO training |
+| [`scripts/memory_profile_lora.sh`](scripts/memory_profile_lora.sh) | Profile memory for LoRA training |
 
 **Docs:**
 | File | Description |
