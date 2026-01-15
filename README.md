@@ -556,6 +556,14 @@ Key changes:
 "flash-attn>=2.8.3; platform_machine != 'aarch64'"
 ```
 
+### Trained Models
+
+Models trained on DGX Spark using this setup:
+
+| Model | Base | Dataset | Training |
+|-------|------|---------|----------|
+| [natolambert/qwen3-dgx-spark-sft](https://huggingface.co/natolambert/qwen3-dgx-spark-sft) | Qwen3-0.6B | no_robots | SFT |
+
 ## Contributing
 
 Got a framework working on DGX Spark? Open a PR to add it here!
