@@ -1,8 +1,32 @@
 # DGX Spark ML Training Setup
 
-A comprehensive guide for setting up ML training on NVIDIA DGX Spark with GB10 (Blackwell, sm_121, CUDA 13.0, aarch64).
+## Why This Repo Exists
 
-This guide was created while getting [open-instruct](https://github.com/allenai/open-instruct) running on DGX Spark for SFT and GRPO/RL training.
+*As of 15 Jan. 2026*
+
+The NVIDIA DGX Spark is a unique machine: it pairs a Blackwell GPU (GB10, sm_121) with an ARM CPU (aarch64), unified 128GB memory, and **requires CUDA 13.0**. This combination creates significant challenges for ML practitioners because the broader ecosystem hasn't caught up yet.
+
+**The core problem is a CUDA version mismatch.** Blackwell (sm_121) is only supported in CUDA 13.0+, but nearly all pip-installable ML packages—vLLM, flash-attn, and many others—ship wheels compiled against CUDA 12.x. When you try to import them, you get:
+
+```
+ImportError: libcudart.so.12: cannot open shared object file
+```
+
+This happens because CUDA 12 libraries simply don't exist on DGX Spark.
+
+**Additional challenges:**
+
+1. **Unified memory behaves differently.** The 128GB is shared between CPU and GPU. Standard GPU OOM errors become system-wide memory exhaustion, which can freeze the entire machine rather than just killing your job.
+
+2. **Flash Attention doesn't work** (and isn't needed). The upstream `flash-attn` package fails to load, but PyTorch's native SDPA with cuDNN 9.13 is actually faster on Blackwell anyway.
+
+3. **The ecosystem is fragile.** There are no stable cu130 aarch64 vLLM releases on PyPI. We rely on nightly wheels hosted at `wheels.vllm.ai` that could change at any time.
+
+4. **ARM + CUDA 13 is a rare combination.** Most CI/CD systems don't test this configuration, so you're often the first to encounter issues.
+
+This guide documents working configurations, safe batch sizes, and fallback procedures developed while getting [open-instruct](https://github.com/allenai/open-instruct) running on DGX Spark. The goal is to save you the days of debugging we went through.
+
+---
 
 ## Contents
 
